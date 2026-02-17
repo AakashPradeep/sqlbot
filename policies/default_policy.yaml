@@ -1,0 +1,28 @@
+mode: "read_only"
+max_limit: 200
+default_limit: 50
+
+# OPTIONAL exact allow-list (still supported; can remain empty)
+allow_tables: []
+
+# Regex allow rules (table identifiers).
+# We normalize table identifiers as:
+# - "db.table" when db exists in the query
+# - "table" when unqualified
+allow_table_regex:
+  - ".*"          # allow all tables referenced as db1.<table>
+
+# OPTIONAL exact deny table-list (still supported)
+deny_tables: []
+
+# Regex deny rules (blacklist). DENY always overrides allow.
+deny_table_regex:
+  - "db1\\.secret_.*"
+  - "db1\\.pii\\..*"    # if you use 3-part names like db.schema.table (see note)
+
+# Optional: enforce tenant filter (if you have org_id / account_id)
+# These must appear in the WHERE clause (or as an equivalent filter).
+required_filters: []
+# Example:
+# required_filters:
+#   - "org_id = :org_id"
