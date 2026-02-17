@@ -1,0 +1,258 @@
+# Safe Text-to-SQL Bot (with Guardrails + Charts)
+
+Turn natural language questions into **safe, read-only SQL** with **table access controls**, **LIMIT enforcement**, and a **chat UI**. Includes both **Gradio** (interactive chat + charting) and **Streamlit** (simple demo UI).
+
+---
+
+## ✨ Features
+
+### ✅ Safe by default
+- **Read-only mode** blocks DDL/DML (DROP/DELETE/UPDATE/INSERT/ALTER/etc.)
+- **SELECT-only enforcement** using SQL AST parsing (`sqlglot`)
+- **Allow/Deny table controls**
+  - exact allow list: `allow_tables`
+  - regex allow list: `allow_table_regex` (great for large DBs)
+  - exact deny list: `deny_tables`
+  - regex deny list: `deny_table_regex` (deny always wins)
+- **Tenant protection (optional)** via required filters (e.g. `org_id = :org_id`)
+- **LIMIT enforcement**
+  - adds a `default_limit` if missing
+  - caps at `max_limit` to prevent large scans
+
+### 🧠 Better SQL with self-heal retry
+If the first SQL fails:
+1. capture the error (validator or DB error)
+2. ask the LLM to fix the query once
+3. validate + run again
+
+### 📊 Intelligent charting (single plot)
+- Default output is a **table**
+- If you ask “plot / chart / line graph / trend…”, it produces a **chart**
+- One chart panel supports:
+  - line
+  - bar
+  - scatter
+  - area
+  - box plot
+- Includes optional X/Y dropdown overrides
+
+---
+
+## 🧱 Project structure
+
+```text
+sqlbot/
+  src/
+    core/
+      config.py        # env/config loader
+      policies.py      # YAML policy compilation (regex compiled once)
+      schema.py        # DB introspection + schema text formatting
+      prompt.py        # prompt templates for SQL generation
+      generate.py      # LLM wrapper + SQL generation
+      validate.py      # guardrails (AST + rules)
+      execute.py       # query execution via SQLAlchemy
+      retry_fix.py     # self-heal prompt to fix SQL
+    app/
+      gradio_ui.py     # chat UI + table + single chart panel
+      streamlit_ui.py  # optional Streamlit UI
+  policy.yaml          # default guardrails policy
+  examples/
+    chinook.db         # sample sqlite db (optional)
+  .env.example
+  requirements.txt
+```
+## 🚀 Quickstart
+### 1) Create and activate a virtualenv
+```
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2) Add environment variables
+
+```
+cp .env.example .env
+```
+
+Edit .env as needed (details below).
+
+### 3) Run the Gradio app (recommended)
+
+```
+PYTHONPATH=. python -m src.app.gradio_ui
+```
+Then open the local URL printed in the console
+
+### 4) Run Streamlit (optional)
+
+PYTHONPATH=. streamlit run src/app/streamlit_ui.py
+
+
+## 🔐 Environment variables (.env)
+```
+# ---- LLM ----
+OPENAI_API_KEY=your_openai_key_here
+LLM_MODEL=gpt-4o-mini
+
+# ---- DATABASE ----
+# Examples:
+# SQLite: sqlite:///examples/chinook.db
+# Postgres: postgresql+psycopg2://user:password@localhost:5432/mydb
+DB_URL=sqlite:///examples/chinook.db
+
+# ---- POLICY ----
+POLICY_PATH=policy.yaml
+```
+
+### Database username/password?
+	•	For SQLite, username/password is not needed.
+	•	For Postgres/MySQL, embed credentials in DB_URL:
+	•	postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME
+	•	mysql+pymysql://USER:PASSWORD@HOST:3306/DBNAME
+
+Tip: If you don’t want passwords in .env, you can also use cloud IAM auth / local secrets manager later. For MVP, .env is fine.
+
+⸻
+
+## 🛡️ Policy file (policy.yaml)
+
+This repo uses a YAML policy file for runtime guardrails.
+
+Example policy (safe defaults)
+```
+mode: "read_only"
+max_limit: 200
+default_limit: 50
+
+# Optional: exact allow-list (can be empty)
+allow_tables: []
+
+# Regex allow rules (table identifiers).
+# We normalize identifiers as:
+# - "db.table" when db exists in the query
+# - "table" when unqualified
+allow_table_regex:
+  - ".*"   # allow all tables (use stricter patterns in production)
+
+# Optional exact deny list
+deny_tables: []
+
+# Deny regex rules (deny ALWAYS wins)
+deny_table_regex:
+  - "db1\\.secret_.*"
+  - "db1\\.pii\\..*"
+
+# Optional: enforce tenant filters (must appear in WHERE)
+required_filters: []
+# Example:
+# required_filters:
+#   - "org_id = :org_id"
+```
+
+
+### How allow/deny works
+	•	If deny_* matches → blocked (even if allowed)
+	•	If no allow rules exist (both allow lists empty) → fail closed
+	•	Otherwise → query must match allow rules
+
+⸻
+
+## 📊 Charting usage
+
+The Gradio UI plots automatically when you ask for it:
+
+Examples
+	•	“Show revenue over time as a line chart”
+	•	“Plot top 10 customers by spend”
+	•	“Show scatter plot of quantity vs total”
+
+Controls
+	•	Output mode
+	•	auto: chart only when you ask
+	•	chart: always show chart (even if user didn’t ask)
+	•	table_only: never show chart
+	•	Chart type
+	•	auto / line / bar / scatter / area / box
+	•	X / Y overrides
+	•	if the auto-picked columns aren’t what you want
+
+⸻
+
+## 🧪 Testing with Chinook (SQLite)
+
+If you’re using the sample SQLite DB:
+	1.	Ensure it exists:
+    ```
+    ls -l examples/chinook.db
+    ```
+	2.	Confirm it opens:
+    ```
+    sqlite3 examples/chinook.db ".tables"
+    ```    
+	3.	Run Gradio and try:
+
+	•	“Top 10 artists by number of tracks”
+	•	“Total sales by country”
+	•	“Revenue trend over time (line chart)”
+
+If you see: unable to open database file
+	•	verify the path exists
+	•	ensure DB_URL=sqlite:///examples/chinook.db
+	•	run from repo root (same directory as src/)
+
+⸻
+
+## 🔎 How it works (high-level flow)
+	1.	Load policy → compile regex once
+	2.	Introspect schema → convert to prompt-friendly text
+	3.	User asks a question
+	4.	LLM generates SQL
+	5.	Guardrails validate SQL:
+        •	read-only
+        •	SELECT-only
+        •	allow/deny tables
+        •	required filters
+        •	LIMIT enforce/cap
+	6.	Execute SQL using SQLAlchemy
+	7.	Return results table
+	8.	If the user asks for a chart → infer x/y + render a single plot
+
+⸻
+
+## 🔐 Security / Privacy
+	•	Your DB is queried directly from your machine/server where the app runs.
+	•	The LLM receives:
+	•	the question
+	•	schema text (introspected)
+	•	policy constraints
+	•	(on retry) SQL + error message
+	•	If using a hosted model (OpenAI), the prompt and schema are sent to the model API.
+
+## Recommendations
+	•	Use strict allow/deny rules for production
+	•	Use required tenant filters for multi-tenant setups
+	•	Consider schema minimization (only include relevant tables)
+
+⸻
+
+## 🗺️ Roadmap / Improvements
+	•	Smarter schema compression for large DBs
+	•	Column-level allow/deny (PII protection)
+	•	CTE-aware policy enforcement (already AST-based, can tighten more)
+	•	Query cost estimation / execution timeout
+	•	Cached schema + incremental refresh
+	•	Local / offline LLM mode
+
+⸻
+
+## 📄 License
+
+MIT license
+
+⸻
+
+## 🙌 Acknowledgements
+	•	sqlglot￼ for reliable SQL parsing and AST transformations
+	•	Gradio / Streamlit for quick UI iteration
+
