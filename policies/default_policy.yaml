@@ -10,7 +10,7 @@ allow_tables: []
 # - "db.table" when db exists in the query
 # - "table" when unqualified
 allow_table_regex:
-  - ".*"          # allow all tables referenced as db1.<table>
+  - ".*"          # allow all tables
 
 # OPTIONAL exact deny table-list (still supported)
 deny_tables: []
